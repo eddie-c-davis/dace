@@ -1,5 +1,4 @@
 # Copyright 2019-2021 ETH Zurich and the DaCe authors. All rights reserved.
-import os
 import dace
 from dace import registry, symbolic, dtypes
 from dace.codegen.prettycode import CodeIOStream
@@ -86,10 +85,6 @@ void __dace_exit_mpi({sdfg.name}_t *__state) {{
             compiler = make_absolute(Config.get("compiler", "mpi",
                                                 "executable"))
             options.append("-DMPI_CXX_COMPILER=\"{}\"".format(compiler))
-
-        mpi_libraries = os.environ.get("MPI_LIBRARIES", "")
-        if mpi_libraries:
-            options.append("-DMPI_LIBRARIES=\"{}\"".format(mpi_libraries))
 
         return options
 
