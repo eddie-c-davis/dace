@@ -349,9 +349,10 @@ def get_environment_flags(environments) -> Tuple[List[str], Set[str]]:
         "-DDACE_ENV_CMAKE_FILES=\"{}\"".format(";".join(sorted(cmake_files))),
     ]
 
-    mpi_libraries = os.environ.get("MPI_LIBRARIES", "")
-    if mpi_libraries:
-        environment_flags.append("-DMPI_LIBRARIES=\"{}\"".format(mpi_libraries))
+    var_name = "MPI_LIBRARIES"
+    var_value = os.environ.get(var_name, "")
+    if var_value:
+        environment_flags.append(f"-D{var_name}=\"{var_value}\"")
 
     # Escape variable expansions to defer their evaluation
     environment_flags = [
