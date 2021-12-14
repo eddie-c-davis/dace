@@ -3666,10 +3666,11 @@ class ProgramVisitor(ExtNodeVisitor):
         if isinstance(func, SDFG):
             sdfg = copy.deepcopy(func)
             funcname = sdfg.name
-            args = [(aname, self._parse_function_arg(arg))
+            posargs = [(aname, self._parse_function_arg(arg))
                     for aname, arg in zip(sdfg.arg_names, node.args)]
-            args += [(arg.arg, self._parse_function_arg(arg.value))
+            kwargs = [(arg.arg, self._parse_function_arg(arg.value))
                      for arg in node.keywords]
+            args = posargs + kwargs
             required_args = [
                 a for a in sdfg.arglist().keys()
                 if a not in sdfg.symbols and not a.startswith('__return')
@@ -3677,12 +3678,12 @@ class ProgramVisitor(ExtNodeVisitor):
             all_args = required_args
         elif isinstance(func, SDFGConvertible) or self._has_sdfg(func):
             argnames, constant_args = func.__sdfg_signature__()
-            args = [(aname, self._parse_function_arg(arg))
-                    for aname, arg in zip(argnames, node.args)]
-            args += [(arg.arg, self._parse_function_arg(arg.value))
-                     for arg in node.keywords]
+            posargs = [(aname, self._parse_function_arg(arg))
+                       for aname, arg in zip(argnames, node.args)]
+            kwargs = [(arg.arg, self._parse_function_arg(arg.value))
+                      for arg in node.keywords]
             required_args = argnames
-            fargs = (self._eval_arg(arg) for _, arg in args)
+            args = posargs + kwargs
 
             # fcopy = copy.copy(func)
             fcopy = func
@@ -3690,11 +3691,23 @@ class ProgramVisitor(ExtNodeVisitor):
                 fcopy.global_vars = {**self.globals, **func.global_vars}
 
             try:
+                fargs = tuple(self._eval_arg(arg) for _, arg in posargs)
+                fkwargs = {k: self._eval_arg(arg) for k, arg in kwargs}
+
                 if isinstance(fcopy, DaceProgram):
                     fcopy.signature = copy.deepcopy(func.signature)
-                    sdfg = fcopy.to_sdfg(*fargs, strict=self.strict, save=False)
+                    sdfg = fcopy.to_sdfg(*fargs,
+                                         **fkwargs,
+                                         strict=self.strict,
+                                         save=False)
                 else:
-                    sdfg = fcopy.__sdfg__(*fargs)
+                    sdfg = fcopy.__sdfg__(*fargs, **fkwargs)
+
+                    # Filter out parsed/omitted arguments
+                    posargs = [(k, v) for k, v in posargs if k in required_args]
+                    kwargs = [(k, v) for k, v in kwargs if k in required_args]
+                    args = posargs + kwargs
+
             except:  # Parsing failure
                 # If parsing fails in an auto-parsed context, exit silently
                 if hasattr(node.func, 'oldnode'):
@@ -3766,15 +3779,15 @@ class ProgramVisitor(ExtNodeVisitor):
         required_args = dtypes.deduplicate(required_args)
 
         # Argument checks
-        for arg in node.keywords:
+        for aname, arg in kwargs:
             # Skip explicit return values
-            if arg.arg.startswith('__return'):
-                required_args.append(arg.arg)
+            if aname.startswith('__return'):
+                required_args.append(aname)
                 continue
-            if arg.arg not in required_args and arg.arg not in all_args:
+            if aname not in required_args and aname not in all_args:
                 raise DaceSyntaxError(
                     self, node, 'Invalid keyword argument "%s" in call to '
-                    '"%s"' % (arg.arg, funcname))
+                    '"%s"' % (aname, funcname))
         if len(args) != len(required_args):
             raise DaceSyntaxError(
                 self, node, 'Argument number mismatch in'
@@ -4169,7 +4182,7 @@ class ProgramVisitor(ExtNodeVisitor):
                     if isinstance(dtype, data.Data):
                         n, arr = self.sdfg.add_temp_transient_like(dtype)
                     elif isinstance(dtype, dtypes.typeclass):
-                        n, arr = self.sdfg.add_temp_transient((1,), dtype)
+                        n, arr = self.sdfg.add_temp_transient((1, ), dtype)
                     else:
                         n, arr = None, None
                 else:
