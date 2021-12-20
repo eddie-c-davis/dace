@@ -192,20 +192,11 @@ def parse_dace_program(name: str,
                           repl_callback,
                           value_as_string=True)
 
-    # We save information in a tmp file for improved source mapping.
-    if save:
-        other_functions = [
-            func for func in closure.closure_sdfgs
-            if not func == visitor.orig_name
-        ]
-        data = {
-            "start_line": visitor.src_line + 1,
-            "end_line":
-            visitor.src_line + len(preprocessed_ast.src.split("\n")) - 1,
-            "src_file": path.abspath(preprocessed_ast.filename),
-            "other_sdfgs": other_functions,
-        }
-        sourcemap.temporaryInfo(visitor.orig_name, data)
+    sdfg.debuginfo = dtypes.DebugInfo(
+        visitor.src_line + 1,
+        end_line=visitor.src_line + len(preprocessed_ast.src.split("\n")) - 1,
+        filename=path.abspath(preprocessed_ast.filename),
+    )
 
     return sdfg
 
@@ -4127,11 +4118,19 @@ class ProgramVisitor(ExtNodeVisitor):
         parent_is_toplevel = True
         parent: ast.AST = None
         for anode in ast.walk(self.program_ast):
+            if parent is not None:
+                break
             for child in ast.iter_child_nodes(anode):
                 if child is node:
                     parent = anode
                     parent_is_toplevel = getattr(anode, 'toplevel', False)
                     break
+                if hasattr(child, 'func') and hasattr(child.func, 'oldnode'):
+                    # Check if the AST node is part of a failed parse
+                    if child.func.oldnode is node:
+                        parent = anode
+                        parent_is_toplevel = getattr(anode, 'toplevel', False)
+                        break
         if parent is None:
             raise DaceSyntaxError(
                 self, node,
@@ -4257,12 +4256,12 @@ class ProgramVisitor(ExtNodeVisitor):
                     self.sdfg.arrays[cname].dtype)
 
         # Setup arguments in graph
-        for arg in args:
+        for arg in dtypes.deduplicate(args):
             r = self.last_state.add_read(arg)
             self.last_state.add_edge(r, None, tasklet, f'__in_{arg}',
                                      Memlet(arg))
 
-        for arg in outargs:
+        for arg in dtypes.deduplicate(outargs):
             w = self.last_state.add_write(arg)
             self.last_state.add_edge(tasklet, f'__out_{arg}', w, None,
                                      Memlet(arg))

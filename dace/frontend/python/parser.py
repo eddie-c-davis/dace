@@ -145,7 +145,6 @@ class DaceProgram(pycommon.SDFGConvertible):
         self.f = f
         self.dec_args = args
         self.dec_kwargs = kwargs
-        self.name = f.__name__
         self.resolve_functions = constant_functions
         self.argnames = _get_argnames(f)
         if method:
@@ -207,13 +206,44 @@ class DaceProgram(pycommon.SDFGConvertible):
                 strict=None,
                 save=False,
                 validate=False,
+                use_cache=False,
                 **kwargs) -> SDFG:
         """ Parses the DaCe function into an SDFG. """
-        return self._parse(args,
+        if use_cache:
+            # Update global variables with current closure
+            self.global_vars = _get_locals_and_globals(self.f)
+
+            # Move "self" from an argument into the closure
+            if self.methodobj is not None:
+                self.global_vars[self.objname] = self.methodobj
+
+            argtypes, arg_mapping, constant_args = self._get_type_annotations(
+                args, kwargs)
+
+            # Add constant arguments to globals for caching
+            self.global_vars.update(constant_args)
+
+            # Check cache for already-parsed SDFG
+            cachekey = self._cache.make_key(argtypes, self.closure_array_keys,
+                                            self.closure_constant_keys,
+                                            constant_args)
+
+            if self._cache.has(cachekey):
+                entry = self._cache.get(cachekey)
+                return entry.sdfg
+
+        sdfg = self._parse(args,
                            kwargs,
                            strict=strict,
                            save=save,
                            validate=validate)
+
+        if use_cache:
+            # Add to cache
+            self._cache.add(cachekey, sdfg, None)
+
+        return sdfg
+
 
     def __sdfg__(self, *args, **kwargs) -> SDFG:
         return self._parse(args,
@@ -239,6 +269,16 @@ class DaceProgram(pycommon.SDFGConvertible):
     @methodobj.setter
     def methodobj(self, new_obj: Any):
         self._methodobj = new_obj
+
+    @property
+    def name(self) -> str:
+        """ Returns a unique name for this program. """
+        result = ''
+        if self.f.__module__ is not None and self.f.__module__ != '__main__':
+            result += self.f.__module__.replace('.', '_') + '_'
+        if self._methodobj is not None:
+            result += type(self._methodobj).__name__ + '_'
+        return result + self.f.__name__
 
     def __sdfg_signature__(self) -> Tuple[Sequence[str], Sequence[str]]:
         return self.argnames, self.constant_args
